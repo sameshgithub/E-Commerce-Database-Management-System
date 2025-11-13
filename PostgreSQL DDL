@@ -1,0 +1,110 @@
+-- -------------------------
+-- basic e-commerce schema
+-- PostgreSQL dialect (adjust types for MySQL if needed)
+-- -------------------------
+
+-- USERS
+CREATE TABLE users (
+    user_id       SERIAL PRIMARY KEY,
+    email         TEXT NOT NULL UNIQUE,
+    password_hash TEXT NOT NULL,
+    full_name     TEXT,
+    phone         TEXT,
+    created_at    TIMESTAMP WITH TIME ZONE DEFAULT now()
+);
+
+-- ADDRESSES (one user can have many shipping addresses)
+CREATE TABLE addresses (
+    address_id    SERIAL PRIMARY KEY,
+    user_id       INT REFERENCES users(user_id) ON DELETE CASCADE,
+    label         TEXT, -- 'home','office'
+    street        TEXT,
+    city          TEXT,
+    state         TEXT,
+    postal_code   TEXT,
+    country       TEXT,
+    created_at    TIMESTAMP WITH TIME ZONE DEFAULT now()
+);
+
+-- CATEGORIES (hierarchy optional via parent_id)
+CREATE TABLE categories (
+    category_id   SERIAL PRIMARY KEY,
+    name          TEXT NOT NULL UNIQUE,
+    parent_id     INT REFERENCES categories(category_id) ON DELETE SET NULL,
+    created_at    TIMESTAMP WITH TIME ZONE DEFAULT now()
+);
+
+-- PRODUCTS
+CREATE TABLE products (
+    product_id    SERIAL PRIMARY KEY,
+    sku           TEXT UNIQUE NOT NULL,
+    name          TEXT NOT NULL,
+    description   TEXT,
+    price         NUMERIC(10,2) NOT NULL CHECK (price >= 0),
+    cost_price    NUMERIC(10,2),
+    created_at    TIMESTAMP WITH TIME ZONE DEFAULT now()
+);
+
+-- Product <> Category many-to-many
+CREATE TABLE product_categories (
+    product_id INT REFERENCES products(product_id) ON DELETE CASCADE,
+    category_id INT REFERENCES categories(category_id) ON DELETE CASCADE,
+    PRIMARY KEY (product_id, category_id)
+);
+
+-- Product images
+CREATE TABLE product_images (
+    image_id    SERIAL PRIMARY KEY,
+    product_id  INT REFERENCES products(product_id) ON DELETE CASCADE,
+    url         TEXT NOT NULL,
+    alt_text    TEXT,
+    ordinal     INT DEFAULT 0
+);
+
+-- INVENTORY (per product)
+CREATE TABLE inventory (
+    product_id   INT PRIMARY KEY REFERENCES products(product_id) ON DELETE CASCADE,
+    quantity     INT NOT NULL DEFAULT 0 CHECK (quantity >= 0),
+    reserved     INT NOT NULL DEFAULT 0 CHECK (reserved >= 0),
+    last_updated TIMESTAMP WITH TIME ZONE DEFAULT now()
+);
+-- available = quantity - reserved (logical)
+
+-- ORDERS
+CREATE TABLE orders (
+    order_id     BIGSERIAL PRIMARY KEY,
+    user_id      INT REFERENCES users(user_id) ON DELETE SET NULL,
+    address_id   INT REFERENCES addresses(address_id) ON DELETE SET NULL,
+    status       TEXT NOT NULL DEFAULT 'PENDING', -- PENDING,PAID,PROCESSING,SHIPPED,CANCELLED,REFUNDED
+    total_amount NUMERIC(12,2) NOT NULL CHECK (total_amount >= 0),
+    created_at   TIMESTAMP WITH TIME ZONE DEFAULT now(),
+    updated_at   TIMESTAMP WITH TIME ZONE DEFAULT now()
+);
+
+-- ORDER ITEMS
+CREATE TABLE order_items (
+    order_item_id BIGSERIAL PRIMARY KEY,
+    order_id      BIGINT REFERENCES orders(order_id) ON DELETE CASCADE,
+    product_id    INT REFERENCES products(product_id),
+    sku           TEXT NOT NULL,
+    product_name  TEXT NOT NULL,
+    unit_price    NUMERIC(10,2) NOT NULL CHECK (unit_price >= 0),
+    quantity      INT NOT NULL CHECK (quantity > 0),
+    line_total    NUMERIC(12,2) NOT NULL CHECK (line_total >= 0)
+);
+
+-- PAYMENTS
+CREATE TABLE payments (
+    payment_id    BIGSERIAL PRIMARY KEY,
+    order_id      BIGINT REFERENCES orders(order_id) ON DELETE CASCADE,
+    amount        NUMERIC(12,2) NOT NULL CHECK (amount >= 0),
+    method        TEXT NOT NULL, -- 'card','upi','wallet'
+    provider_txn  TEXT, -- provider transaction id
+    status        TEXT NOT NULL DEFAULT 'PENDING', -- PENDING,COMPLETED,FAILED,REFUNDED
+    created_at    TIMESTAMP WITH TIME ZONE DEFAULT now()
+);
+
+-- Indexes for common lookups
+CREATE INDEX idx_products_sku ON products(sku);
+CREATE INDEX idx_orders_user ON orders(user_id);
+CREATE INDEX idx_readings_created_at ON orders(created_at); -- reused name; optional
