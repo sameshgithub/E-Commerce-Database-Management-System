@@ -1,0 +1,66 @@
+-- Example as a plpgsql function to create an order atomically.
+-- Input: user_id, address_id, JSON array of items [{product_id, quantity},...]
+-- Returns: order_id or raises exception
+
+CREATE OR REPLACE FUNCTION create_order(p_user_id INT, p_address_id INT, p_items JSON)
+RETURNS BIGINT LANGUAGE plpgsql AS $$
+DECLARE
+  v_order_id BIGINT;
+  v_total NUMERIC := 0;
+  v_item JSON;
+  v_prod_id INT;
+  v_qty INT;
+  v_price NUMERIC;
+  v_sku TEXT;
+  v_name TEXT;
+BEGIN
+  -- start a transaction (function runs inside caller tx)
+  -- For each item: check inventory, reserve, compute price
+  PERFORM pg_advisory_xact_lock(1); -- optional coarse lock to avoid races in simple setups
+
+  FOR v_item IN SELECT * FROM json_array_elements(p_items)
+  LOOP
+    v_prod_id := (v_item->>'product_id')::int;
+    v_qty := (v_item->>'quantity')::int;
+
+    SELECT price, sku, name INTO v_price, v_sku, v_name FROM products WHERE product_id = v_prod_id;
+    IF NOT FOUND THEN
+      RAISE EXCEPTION 'Product % not found', v_prod_id;
+    END IF;
+
+    -- check inventory
+    UPDATE inventory
+    SET reserved = reserved + v_qty, last_updated = now()
+    WHERE product_id = v_prod_id
+      AND (quantity - reserved) >= v_qty;
+
+    IF NOT FOUND THEN
+      RAISE EXCEPTION 'Insufficient stock for product %', v_prod_id;
+    END IF;
+
+    v_total := v_total + (v_price * v_qty);
+  END LOOP;
+
+  -- create order
+  INSERT INTO orders (user_id, address_id, status, total_amount, created_at, updated_at)
+  VALUES (p_user_id, p_address_id, 'PENDING', v_total, now(), now())
+  RETURNING order_id INTO v_order_id;
+
+  -- insert order items and finalize line totals
+  FOR v_item IN SELECT * FROM json_array_elements(p_items)
+  LOOP
+    v_prod_id := (v_item->>'product_id')::int;
+    v_qty := (v_item->>'quantity')::int;
+    SELECT price, sku, name INTO v_price, v_sku, v_name FROM products WHERE product_id = v_prod_id;
+
+    INSERT INTO order_items (order_id, product_id, sku, product_name, unit_price, quantity, line_total)
+    VALUES (v_order_id, v_prod_id, v_sku, v_name, v_price, v_qty, (v_price * v_qty));
+  END LOOP;
+
+  RETURN v_order_id;
+EXCEPTION
+  WHEN others THEN
+    -- on error, rollback will happen automatically if function called within a transaction
+    RAISE;
+END;
+$$;
