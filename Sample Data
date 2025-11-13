@@ -1,0 +1,27 @@
+-- sample users
+INSERT INTO users (email, password_hash, full_name, phone) VALUES
+('alice@example.com','$2b$...','Alice Kumar','+919876543210'),
+('bob@example.com','$2b$...','Bob Singh','+919812345678');
+
+-- categories
+INSERT INTO categories (name) VALUES ('Electronics'), ('Books'), ('Clothing');
+
+-- products
+INSERT INTO products (sku,name,description,price,cost_price) VALUES
+('SKU-1001','Wireless Mouse','Ergonomic wireless mouse',499.00,250.00),
+('SKU-2001','Learning SQL','Introductory SQL book',799.00,300.00),
+('SKU-3001','T-Shirt','100% cotton t-shirt',299.00,120.00);
+
+-- map categories
+INSERT INTO product_categories (product_id, category_id)
+SELECT p.product_id, c.category_id
+FROM products p, categories c
+WHERE (p.sku='SKU-1001' AND c.name='Electronics')
+   OR (p.sku='SKU-2001' AND c.name='Books')
+   OR (p.sku='SKU-3001' AND c.name='Clothing');
+
+-- inventory
+INSERT INTO inventory (product_id, quantity, reserved) VALUES
+((SELECT product_id FROM products WHERE sku='SKU-1001'), 50, 0),
+((SELECT product_id FROM products WHERE sku='SKU-2001'), 20, 0),
+((SELECT product_id FROM products WHERE sku='SKU-3001'), 100, 0);
