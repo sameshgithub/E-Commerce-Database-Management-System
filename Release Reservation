@@ -1,0 +1,35 @@
+-- mark order PAID and reduce physical stock (quantity)
+CREATE OR REPLACE FUNCTION complete_order(p_order_id BIGINT)
+RETURNS VOID LANGUAGE plpgsql AS $$
+DECLARE
+  rec RECORD;
+BEGIN
+  FOR rec IN SELECT * FROM order_items WHERE order_id = p_order_id
+  LOOP
+    -- decrement quantity and reserved
+    UPDATE inventory
+    SET quantity = quantity - rec.quantity,
+        reserved = GREATEST(reserved - rec.quantity, 0),
+        last_updated = now()
+    WHERE product_id = rec.product_id;
+  END LOOP;
+
+  UPDATE orders SET status = 'PAID', updated_at = now() WHERE order_id = p_order_id;
+END;
+$$;
+CREATE OR REPLACE FUNCTION release_reservation(p_order_id BIGINT)
+RETURNS VOID LANGUAGE plpgsql AS $$
+DECLARE
+  rec RECORD;
+BEGIN
+  FOR rec IN SELECT * FROM order_items WHERE order_id = p_order_id
+  LOOP
+    UPDATE inventory
+    SET reserved = GREATEST(reserved - rec.quantity, 0),
+        last_updated = now()
+    WHERE product_id = rec.product_id;
+  END LOOP;
+
+  UPDATE orders SET status = 'CANCELLED', updated_at = now() WHERE order_id = p_order_id;
+END;
+$$;
